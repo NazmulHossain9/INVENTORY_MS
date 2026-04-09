@@ -434,6 +434,14 @@ class Database:
             ORDER BY u.id
         """).fetchall()
 
+    def verify_user_password(self, user_id, password):
+        """Return True if the given password matches the stored hash for user_id."""
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        row = self.conn.execute(
+            "SELECT id FROM users WHERE id=? AND password=?", (user_id, hashed)
+        ).fetchone()
+        return row is not None
+
     def set_user_password(self, user_id, new_password):
         if len(new_password) < 4:
             raise ValueError("Password must be at least 4 characters.")

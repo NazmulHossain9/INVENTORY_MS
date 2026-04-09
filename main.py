@@ -99,13 +99,14 @@ class NavButton(QPushButton):
 
 
 class Sidebar(QFrame):
-    def __init__(self, on_nav, on_logout, user=None, allowed_menus=None):
+    def __init__(self, on_nav, on_logout, user=None, allowed_menus=None, on_change_password=None):
         super().__init__()
         self.setObjectName("sidebar")
         self.setStyleSheet("QFrame#sidebar { background: #1E293B; }")
         self.setFixedWidth(200)
         self._buttons = {}
         self._on_nav = on_nav
+        self._on_change_password = on_change_password
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -183,6 +184,19 @@ class Sidebar(QFrame):
         user_layout.addWidget(name_lbl)
         user_layout.addWidget(role_lbl)
 
+        chpw_btn = QPushButton("🔑  Change Password")
+        chpw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        chpw_btn.setFixedHeight(30)
+        chpw_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #818CF8; border: none;
+                font-size: 11px; font-weight: 600; text-align: left; padding: 4px 2px;
+            }
+            QPushButton:hover { color: #A5B4FC; }
+        """)
+        chpw_btn.clicked.connect(lambda: on_change_password() if on_change_password else None)
+        user_layout.addWidget(chpw_btn)
+
         logout_btn = QPushButton("⎋  Logout")
         logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         logout_btn.setFixedHeight(30)
@@ -232,6 +246,104 @@ AUTH_STYLE = """
     }
     QPushButton#link_btn:hover { color: #A5B4FC; }
 """
+
+
+class SelfChangePasswordDialog(QDialog):
+    """Lets the currently-logged-in user change their own password."""
+
+    def __init__(self, db: "Database", user: dict, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.user_id = user["id"]
+        self.setWindowTitle("Change My Password – IMS")
+        self.setFixedSize(380, 400)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.MSWindowsFixedSizeDialogHint)
+        self.setStyleSheet(AUTH_STYLE)
+        self._build_ui(user.get("username", ""))
+
+    def _build_ui(self, username):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 36, 40, 30)
+        layout.setSpacing(0)
+
+        title = QLabel("⬛  Change Password")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle = QLabel(f"Logged in as: {username}")
+        subtitle.setObjectName("subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addSpacing(24)
+
+        for attr, label, ph in [
+            ("_inp_old",  "CURRENT PASSWORD", "Enter your current password"),
+            ("_inp_new",  "NEW PASSWORD",      "At least 4 characters"),
+            ("_inp_conf", "CONFIRM PASSWORD",  "Repeat new password"),
+        ]:
+            lbl = QLabel(label); lbl.setObjectName("field")
+            inp = QLineEdit(); inp.setPlaceholderText(ph); inp.setFixedHeight(40)
+            inp.setEchoMode(QLineEdit.EchoMode.Password)
+            layout.addWidget(lbl)
+            layout.addSpacing(4)
+            layout.addWidget(inp)
+            layout.addSpacing(12)
+            setattr(self, attr, inp)
+
+        self._msg = QLabel("")
+        self._msg.setObjectName("error")
+        self._msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._msg.setWordWrap(True)
+        layout.addWidget(self._msg)
+        layout.addSpacing(10)
+
+        save_btn = QPushButton("Save Password")
+        save_btn.setObjectName("primary_btn")
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.clicked.connect(self._submit)
+        layout.addWidget(save_btn)
+        layout.addSpacing(8)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setObjectName("link_btn")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(cancel_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._inp_conf.returnPressed.connect(self._submit)
+        self._inp_new.returnPressed.connect(self._inp_conf.setFocus)
+        self._inp_old.returnPressed.connect(self._inp_new.setFocus)
+
+    def _submit(self):
+        old_pw  = self._inp_old.text()
+        new_pw  = self._inp_new.text()
+        confirm = self._inp_conf.text()
+
+        if not old_pw:
+            self._show_error("Please enter your current password.")
+            return
+        if not self.db.verify_user_password(self.user_id, old_pw):
+            self._show_error("Current password is incorrect.")
+            self._inp_old.clear(); self._inp_old.setFocus()
+            return
+        if not new_pw:
+            self._show_error("New password cannot be empty.")
+            return
+        if new_pw != confirm:
+            self._show_error("New passwords do not match.")
+            self._inp_conf.clear(); self._inp_conf.setFocus()
+            return
+        try:
+            self.db.set_user_password(self.user_id, new_pw)
+            self._msg.setStyleSheet("color: #34D399; font-size: 12px;")
+            self._msg.setText("Password changed successfully!")
+            QTimer.singleShot(1200, self.accept)
+        except ValueError as e:
+            self._show_error(str(e))
+
+    def _show_error(self, text):
+        self._msg.setStyleSheet("color: #F87171; font-size: 12px;")
+        self._msg.setText(text)
 
 
 class RegisterDialog(QDialog):
@@ -413,6 +525,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLE)
 
         self.db = db
+        self._user = user
         self._allowed_menus = allowed_menus   # None = all allowed (admin)
         role_name = (user.get("role_name") or user.get("role", "staff"))
 
@@ -421,7 +534,8 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        self.sidebar = Sidebar(self._navigate, self._logout, user, allowed_menus)
+        self.sidebar = Sidebar(self._navigate, self._logout, user, allowed_menus,
+                               on_change_password=self._change_own_password)
         root_layout.addWidget(self.sidebar)
 
         # Content area with scroll
@@ -489,6 +603,10 @@ class MainWindow(QMainWindow):
             page._reload_cats()
         if hasattr(page, "refresh"):
             page.refresh()
+
+    def _change_own_password(self):
+        dlg = SelfChangePasswordDialog(self.db, self._user, self)
+        dlg.exec()
 
     def _logout(self):
         self.logout_requested.emit()
