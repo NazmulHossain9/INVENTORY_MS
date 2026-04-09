@@ -261,6 +261,7 @@ class Database:
         for stmt in [
             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'staff'",
             "ALTER TABLE users ADD COLUMN role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL",
+            "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
         ]:
             try:
                 self.conn.execute(stmt)
@@ -397,10 +398,10 @@ class Database:
         hashed = hashlib.sha256(password.encode()).hexdigest()
         row = self.conn.execute("""
             SELECT u.id, u.username, u.role, u.role_id,
-                   COALESCE(r.name, u.role) AS role_name
+                   COALESCE(r.name, u.role) AS role_name, u.is_active
             FROM users u
             LEFT JOIN roles r ON r.id = u.role_id
-            WHERE u.username=? AND u.password=?
+            WHERE u.username=? AND u.password=? AND u.is_active=1
         """, (username, hashed)).fetchone()
         return dict(row) if row else None
 
@@ -428,10 +429,21 @@ class Database:
     def get_all_users(self):
         return self.conn.execute("""
             SELECT u.id, u.username, u.role, u.role_id,
-                   COALESCE(r.name, u.role) AS role_name, u.created_at
+                   COALESCE(r.name, u.role) AS role_name, u.created_at, u.is_active
             FROM users u LEFT JOIN roles r ON r.id = u.role_id
             ORDER BY u.id
         """).fetchall()
+
+    def set_user_password(self, user_id, new_password):
+        if len(new_password) < 4:
+            raise ValueError("Password must be at least 4 characters.")
+        hashed = hashlib.sha256(new_password.encode()).hexdigest()
+        self.conn.execute("UPDATE users SET password=? WHERE id=?", (hashed, user_id))
+        self.conn.commit()
+
+    def set_user_active(self, user_id, is_active: bool):
+        self.conn.execute("UPDATE users SET is_active=? WHERE id=?", (1 if is_active else 0, user_id))
+        self.conn.commit()
 
     # ─── Roles ────────────────────────────────────────────────────────────────
 
