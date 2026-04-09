@@ -1,0 +1,9 @@
+[project]
+name = "ims"
+version = "2.0.0"
+description = "Inventory Management System - PyQt6 desktop application"
+requires-python = ">=3.9"
+authors = [{name = "IMS Developer"}]
+dependencies = [
+    "PyQt6>=6.6.0",
+]

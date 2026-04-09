@@ -214,3 +214,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# IMS specific
+*.db
+*.sqlite
+*.sqlite3
+uv.lock
