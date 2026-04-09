@@ -231,9 +231,41 @@ class Database:
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 username   TEXT NOT NULL UNIQUE,
                 password   TEXT NOT NULL,
+                role       TEXT NOT NULL DEFAULT 'staff',
+                role_id    INTEGER REFERENCES roles(id) ON DELETE SET NULL,
                 created_at TEXT DEFAULT (datetime('now','localtime'))
             );
+
+            CREATE TABLE IF NOT EXISTS roles (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at  TEXT DEFAULT (datetime('now','localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS menus (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL UNIQUE,
+                icon       TEXT,
+                section    TEXT,
+                sort_order INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+                menu_id INTEGER NOT NULL REFERENCES menus(id) ON DELETE CASCADE,
+                PRIMARY KEY (role_id, menu_id)
+            );
         """)
+        # Migrations for existing databases
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'staff'",
+            "ALTER TABLE users ADD COLUMN role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL",
+        ]:
+            try:
+                self.conn.execute(stmt)
+            except Exception:
+                pass
         self.conn.commit()
 
     def _seed_defaults(self):
@@ -281,23 +313,199 @@ class Database:
                     ("4002","Other Income",         "REVENUE",   "CR","Miscellaneous income"),
                 ],
             )
-        # Default admin user (password: admin123)
+        # ── Menus (seed all nav pages) ──────────────────────────────────────────
+        _MENU_DEFS = [
+            ("Dashboard",       "📊", None,          1),
+            ("Products",        "📦", "INVENTORY",    2),
+            ("Stock",           "📈", "INVENTORY",    3),
+            ("Transactions",    "🔄", "INVENTORY",    4),
+            ("Sales",           "🛒", "TRADING",      5),
+            ("Sales Return",    "↩",  "TRADING",      6),
+            ("Purchases",       "📋", "TRADING",      7),
+            ("Purchase Return", "↪",  "TRADING",      8),
+            ("Credit",          "💳", "TRADING",      9),
+            ("Customers",       "👥", "PARTIES",     10),
+            ("Suppliers",       "🚚", "PARTIES",     11),
+            ("Cash",            "💰", "FINANCE",     12),
+            ("Accounting",      "📒", "FINANCE",     13),
+            ("Reports",         "📄", "ANALYTICS",   14),
+            ("Categories",      "🏷", "SETTINGS",    15),
+            ("Users",           "👤", "SETTINGS",    16),
+            ("Roles",           "🔑", "SETTINGS",    17),
+        ]
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO menus (name, icon, section, sort_order) VALUES (?,?,?,?)",
+            _MENU_DEFS
+        )
+
+        # ── Roles ────────────────────────────────────────────────────────────────
+        self.conn.executemany(
+            "INSERT OR IGNORE INTO roles (name, description) VALUES (?,?)",
+            [("admin", "Full system access — all menus"),
+             ("staff", "Standard access — daily operations only")]
+        )
+        # ── Default permissions ──────────────────────────────────────────────────
+        admin_id = self.conn.execute("SELECT id FROM roles WHERE name='admin'").fetchone()["id"]
+        staff_id = self.conn.execute("SELECT id FROM roles WHERE name='staff'").fetchone()["id"]
+
+        # Admin gets every menu
+        for row in self.conn.execute("SELECT id FROM menus").fetchall():
+            self.conn.execute(
+                "INSERT OR IGNORE INTO role_permissions (role_id, menu_id) VALUES (?,?)",
+                (admin_id, row["id"])
+            )
+        # Staff gets daily-operations menus
+        _STAFF_MENUS = [
+            "Dashboard", "Products", "Stock", "Sales", "Sales Return",
+            "Purchases", "Purchase Return", "Credit", "Customers", "Suppliers", "Cash",
+        ]
+        for name in _STAFF_MENUS:
+            row = self.conn.execute("SELECT id FROM menus WHERE name=?", (name,)).fetchone()
+            if row:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO role_permissions (role_id, menu_id) VALUES (?,?)",
+                    (staff_id, row["id"])
+                )
+
+        # ── Default admin user (password: admin123) ──────────────────────────────
         cur = self.conn.execute("SELECT COUNT(*) FROM users")
         if cur.fetchone()[0] == 0:
             hashed = hashlib.sha256("admin123".encode()).hexdigest()
             self.conn.execute(
-                "INSERT INTO users (username, password) VALUES (?, ?)",
-                ("admin", hashed)
+                "INSERT INTO users (username, password, role, role_id) VALUES (?,?,?,?)",
+                ("admin", hashed, "admin", admin_id)
             )
+        else:
+            self.conn.execute(
+                "UPDATE users SET role='admin' WHERE username='admin' AND role='staff'"
+            )
+
+        # ── Migrate existing users: populate role_id from role TEXT ──────────────
+        for rname in ("admin", "staff"):
+            rid = self.conn.execute(
+                "SELECT id FROM roles WHERE name=?", (rname,)
+            ).fetchone()
+            if rid:
+                self.conn.execute(
+                    "UPDATE users SET role_id=? WHERE role=? AND role_id IS NULL",
+                    (rid["id"], rname)
+                )
 
         self.conn.commit()
 
     def check_credentials(self, username, password):
         hashed = hashlib.sha256(password.encode()).hexdigest()
-        row = self.conn.execute(
-            "SELECT id FROM users WHERE username=? AND password=?", (username, hashed)
+        row = self.conn.execute("""
+            SELECT u.id, u.username, u.role, u.role_id,
+                   COALESCE(r.name, u.role) AS role_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.username=? AND u.password=?
+        """, (username, hashed)).fetchone()
+        return dict(row) if row else None
+
+    def register_user(self, username, password, role_name="staff"):
+        """Register a new user. Raises ValueError on validation failure."""
+        username = username.strip()
+        if not username:
+            raise ValueError("Username cannot be empty.")
+        if len(password) < 4:
+            raise ValueError("Password must be at least 4 characters.")
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        role_row = self.conn.execute(
+            "SELECT id FROM roles WHERE name=?", (role_name,)
         ).fetchone()
-        return row is not None
+        role_id = role_row["id"] if role_row else None
+        try:
+            self.conn.execute(
+                "INSERT INTO users (username, password, role, role_id) VALUES (?,?,?,?)",
+                (username, hashed, role_name, role_id)
+            )
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Username '{username}' is already taken.")
+
+    def get_all_users(self):
+        return self.conn.execute("""
+            SELECT u.id, u.username, u.role, u.role_id,
+                   COALESCE(r.name, u.role) AS role_name, u.created_at
+            FROM users u LEFT JOIN roles r ON r.id = u.role_id
+            ORDER BY u.id
+        """).fetchall()
+
+    # ─── Roles ────────────────────────────────────────────────────────────────
+
+    def get_all_roles(self):
+        return self.conn.execute(
+            "SELECT id, name, description, created_at FROM roles ORDER BY id"
+        ).fetchall()
+
+    def create_role(self, name, description=""):
+        name = name.strip()
+        if not name:
+            raise ValueError("Role name cannot be empty.")
+        try:
+            self.conn.execute(
+                "INSERT INTO roles (name, description) VALUES (?,?)", (name, description)
+            )
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Role '{name}' already exists.")
+
+    def update_role(self, role_id, name, description=""):
+        name = name.strip()
+        if not name:
+            raise ValueError("Role name cannot be empty.")
+        try:
+            self.conn.execute(
+                "UPDATE roles SET name=?, description=? WHERE id=?",
+                (name, description, role_id)
+            )
+            self.conn.commit()
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Role '{name}' already exists.")
+
+    def delete_role(self, role_id):
+        row = self.conn.execute("SELECT name FROM roles WHERE id=?", (role_id,)).fetchone()
+        if row and row["name"] in ("admin", "staff"):
+            raise ValueError("Cannot delete built-in roles (admin / staff).")
+        self.conn.execute("DELETE FROM roles WHERE id=?", (role_id,))
+        self.conn.commit()
+
+    # ─── Menus & Permissions ──────────────────────────────────────────────────
+
+    def get_menus(self):
+        return self.conn.execute(
+            "SELECT id, name, icon, section, sort_order FROM menus ORDER BY sort_order"
+        ).fetchall()
+
+    def get_role_permissions(self, role_id):
+        """Returns set of menu_ids assigned to this role."""
+        rows = self.conn.execute(
+            "SELECT menu_id FROM role_permissions WHERE role_id=?", (role_id,)
+        ).fetchall()
+        return {r["menu_id"] for r in rows}
+
+    def set_role_permissions(self, role_id, menu_ids):
+        """Replace all permissions for a role with the given menu_id set."""
+        self.conn.execute("DELETE FROM role_permissions WHERE role_id=?", (role_id,))
+        for mid in menu_ids:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO role_permissions (role_id, menu_id) VALUES (?,?)",
+                (role_id, mid)
+            )
+        self.conn.commit()
+
+    def get_user_permissions(self, role_id):
+        """Returns set of allowed menu *names* for a role_id."""
+        if role_id is None:
+            return set()
+        rows = self.conn.execute("""
+            SELECT m.name FROM role_permissions rp
+            JOIN menus m ON m.id = rp.menu_id
+            WHERE rp.role_id = ?
+        """, (role_id,)).fetchall()
+        return {r["name"] for r in rows}
 
     # ─── Settings ─────────────────────────────────────────────────────────────
 
