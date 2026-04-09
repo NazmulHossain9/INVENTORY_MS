@@ -256,7 +256,7 @@ class SelfChangePasswordDialog(QDialog):
         self.db = db
         self.user_id = user["id"]
         self.setWindowTitle("Change My Password – IMS")
-        self.setFixedSize(380, 400)
+        self.setFixedSize(380, 460)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.MSWindowsFixedSizeDialogHint)
         self.setStyleSheet(AUTH_STYLE)
         self._build_ui(user.get("username", ""))
@@ -299,6 +299,7 @@ class SelfChangePasswordDialog(QDialog):
 
         save_btn = QPushButton("Save Password")
         save_btn.setObjectName("primary_btn")
+        save_btn.setFixedHeight(44)
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self._submit)
         layout.addWidget(save_btn)

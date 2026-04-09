@@ -1,8 +1,5 @@
 # Inventory Management System (IMS)
 
-# admin
-# admin123
-
 A comprehensive PyQt6-based desktop application for managing inventory, sales, purchases, customers, suppliers, and accounting operations.
 
 ## Features
@@ -193,11 +190,17 @@ sudo apt-get install python3-pyqt6
 
 # Then use --break-system-packages with uv
 uv pip install --break-system-packages PyQt6
+
 ```
 
 ### Database Issues
 If the database becomes corrupted, delete `ims.db` and restart the application to recreate it.
 
+
+```
+# admin
+# admin123
+```
 ### Port Conflicts
 The application uses local SQLite, so no ports are involved. No conflicts should occur.
 
