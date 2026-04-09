@@ -49,6 +49,65 @@ uv pip install -r requirements.txt
 ### Option 3: Using pip
 
 ```bash
+python -m pip install -r requirements.txt
+```
+
+## Build artifacts
+
+### Build Windows executable
+
+You must build the Windows `.exe` artifact on Windows.
+
+```powershell
+uv venv .venv
+.\.venv\Scripts\activate
+uv pip install -r requirements.txt
+python build.py --target exe --name inventory_ms
+```
+
+Output:
+
+- `dist\inventory_ms.exe`
+
+### Build Linux DEB package
+
+Build the Debian package on Linux.
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+sudo apt install dpkg-dev
+python build.py --target deb --name inventory_ms
+```
+
+Output:
+
+- `dist/inventory_ms_2.0.0_amd64.deb`
+
+### Build macOS app bundle
+
+Build the `.app` bundle on macOS.
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv pip install -r requirements.txt
+python build.py --target app --name inventory_ms
+```
+
+Output:
+
+- `dist/inventory_ms.app`
+
+### Notes
+
+- A Windows `.exe` cannot be reliably built on Linux without cross-compilation tooling.
+- The macOS `.app` must be built on macOS.
+- The build scripts use `asset/logo/LogoIMS.png` as the icon source for generated artifacts.
+- The `.deb` package contains the built executable under `/usr/bin/inventory_ms`.
+
+```bash
 # Create virtual environment
 python -m venv .venv
 
