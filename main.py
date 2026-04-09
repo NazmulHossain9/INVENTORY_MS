@@ -413,6 +413,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(APP_STYLE)
 
         self.db = db
+        self._allowed_menus = allowed_menus   # None = all allowed (admin)
+        role_name = (user.get("role_name") or user.get("role", "staff"))
 
         root = QWidget(); self.setCentralWidget(root)
         root_layout = QHBoxLayout(root)
@@ -434,7 +436,7 @@ class MainWindow(QMainWindow):
 
         # Instantiate all pages
         self._pages = {
-            "Dashboard":       DashboardPage(self.db),
+            "Dashboard":       DashboardPage(self.db, role_name),
             "Products":        ProductsPage(self.db),
             "Stock":           StockPage(self.db),
             "Transactions":    TransactionsPage(self.db),
@@ -455,9 +457,28 @@ class MainWindow(QMainWindow):
         for page in self._pages.values():
             self.stack.addWidget(page)
 
-        QTimer.singleShot(0, lambda: self._navigate("Dashboard"))
+        # Navigate to first permitted page (Dashboard preferred)
+        QTimer.singleShot(0, self._navigate_home)
+
+    def _is_permitted(self, label):
+        """Return True if the current user may access this page."""
+        return self._allowed_menus is None or label in self._allowed_menus
+
+    def _navigate_home(self):
+        """Go to Dashboard if permitted, else the first permitted nav page."""
+        if self._is_permitted("Dashboard"):
+            self._navigate("Dashboard")
+            return
+        # Fall back to first permitted item in nav order
+        for _, label, section in NAV_ITEMS:
+            if label and self._is_permitted(label) and label in self._pages:
+                self._navigate(label)
+                return
 
     def _navigate(self, label):
+        # Silently block navigation to pages the user cannot access
+        if not self._is_permitted(label):
+            return
         page = self._pages.get(label)
         if not page:
             return

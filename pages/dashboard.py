@@ -43,9 +43,10 @@ class StatCard(QFrame):
 
 
 class DashboardPage(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, role_name="staff"):
         super().__init__()
         self.db = db
+        self._is_admin = (role_name == "admin")
         self._build()
         self.refresh()
 
@@ -56,7 +57,11 @@ class DashboardPage(QWidget):
 
         root.addWidget(QLabel("Dashboard", styleSheet=f"font-size:22px;font-weight:700;color:{TEXT_DARK};"))
 
-        # Row 1: financial cards
+        # Row 1: financial cards (admin only)
+        self._r1_frame = QFrame()
+        r1_outer = QVBoxLayout(self._r1_frame)
+        r1_outer.setContentsMargins(0, 0, 0, 0)
+        r1_outer.setSpacing(0)
         r1 = QGridLayout(); r1.setSpacing(14)
         self.c_cash      = StatCard("Cash Balance",      color=SUCCESS)
         self.c_sales     = StatCard("Total Sales",       color=PRIMARY)
@@ -69,7 +74,9 @@ class DashboardPage(QWidget):
         for i, c in enumerate([self.c_cash, self.c_sales, self.c_today, self.c_purchases,
                                 self.c_recv, self.c_pay, self.c_unpaid, self.c_profit]):
             r1.addWidget(c, i//4, i%4)
-        root.addLayout(r1)
+        r1_outer.addLayout(r1)
+        self._r1_frame.setVisible(self._is_admin)
+        root.addWidget(self._r1_frame)
 
         # Row 2: stock cards
         r2 = QHBoxLayout(); r2.setSpacing(14)
