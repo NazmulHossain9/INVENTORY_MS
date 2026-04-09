@@ -142,7 +142,109 @@ class ReportsPage(QWidget):
         cf_fl.addWidget(self.tbl_cf); cfl.addWidget(cf_f)
         tabs.addTab(cf_tab, "Cash Flow")
 
+        # ── Summary Report ─────────────────────────────────────────────────────
+        sum_tab = QWidget()
+        suml = QVBoxLayout(sum_tab); suml.setContentsMargins(0, 12, 0, 0); suml.setSpacing(12)
+
+        sum_inner = QTabWidget()
+        sum_inner.setStyleSheet("""
+            QTabWidget::pane { border: none; background: transparent; }
+            QTabBar::tab {
+                background: #F3F4F6; color: #374151; border-radius: 5px;
+                padding: 5px 14px; font-size: 11px; margin-right: 3px;
+            }
+            QTabBar::tab:selected { background: #10B981; color: white; font-weight: 600; }
+        """)
+
+        PERIODS = [
+            ("Daily",   "daily",   -30,  0),
+            ("Weekly",  "weekly",  -3,   0),   # months offset
+            ("Monthly", "monthly", -12,  0),
+            ("Yearly",  "yearly",  -5,   0),
+        ]
+        self._sum_tabs = {}
+        for label, key, months_back, _ in PERIODS:
+            self._sum_tabs[key] = self._make_summary_sub_tab(sum_inner, label, key, months_back)
+
+        suml.addWidget(sum_inner)
+        tabs.addTab(sum_tab, "Summary")
+
         root.addWidget(tabs)
+
+    def _make_summary_sub_tab(self, parent_tabs, label, period_key, months_back):
+        tab = QWidget()
+        lay = QVBoxLayout(tab); lay.setContentsMargins(0, 10, 0, 0); lay.setSpacing(10)
+
+        if period_key == "yearly":
+            default_from = QDate.currentDate().addYears(-5)
+        elif period_key == "weekly":
+            default_from = QDate.currentDate().addMonths(-3)
+        elif period_key == "daily":
+            default_from = QDate.currentDate().addDays(-30)
+        else:
+            default_from = QDate.currentDate().addMonths(-12)
+
+        df_w = QDateEdit(default_from)
+        dt_w = QDateEdit(QDate.currentDate())
+        for d in [df_w, dt_w]:
+            d.setStyleSheet(FIELD_STYLE); d.setCalendarPopup(True); d.setFixedWidth(115)
+
+        sum_lbl = QLabel()
+        sum_lbl.setStyleSheet("font-size:13px;font-weight:600;color:#10B981;")
+
+        # table
+        f = card_frame(); fl = QVBoxLayout(f); fl.setContentsMargins(0, 0, 0, 0)
+        HEADERS = ["Period", "Sales", "Purchases", "Profit"]
+        t = QTableWidget(); t.setColumnCount(len(HEADERS))
+        t.setHorizontalHeaderLabels(HEADERS)
+        t.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        t.setAlternatingRowColors(True); t.verticalHeader().setVisible(False)
+        t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        t.setStyleSheet(TABLE_STYLE)
+        fl.addWidget(t)
+
+        def _load(pk=period_key, dfw=df_w, dtw=dt_w, sl=sum_lbl, tbl=t):
+            date_from = dfw.date().toString("yyyy-MM-dd")
+            date_to   = dtw.date().toString("yyyy-MM-dd")
+            rows = self.db.get_period_summary(pk, date_from, date_to)
+            tbl.setRowCount(len(rows))
+            tot_s = tot_p = 0.0
+            for i, (period, data) in enumerate(rows):
+                s = data["sales"]; p = data["purchases"]; prof = s - p
+                tot_s += s; tot_p += p
+                vals = [period, f"${s:,.2f}", f"${p:,.2f}", f"${prof:,.2f}"]
+                for c, v in enumerate(vals):
+                    item = QTableWidgetItem(v)
+                    if c == 3:
+                        item.setForeground(QColor(SUCCESS if prof >= 0 else DANGER))
+                    tbl.setItem(i, c, item)
+            tot_prof = tot_s - tot_p
+            sl.setText(
+                f"Periods: {len(rows)}  |  Sales: ${tot_s:,.2f}  |  "
+                f"Purchases: ${tot_p:,.2f}  |  Profit: ${tot_prof:,.2f}"
+            )
+
+        df_w.dateChanged.connect(_load)
+        dt_w.dateChanged.connect(_load)
+
+        refresh_btn = btn("Refresh", PRIMARY); refresh_btn.clicked.connect(_load)
+        export_btn  = btn("Export CSV", INFO)
+        export_btn.clicked.connect(lambda: self._export(t, f"{period_key}_summary"))
+
+        dr = QHBoxLayout(); dr.setSpacing(8)
+        dr.addWidget(QLabel("From:")); dr.addWidget(df_w)
+        dr.addWidget(QLabel("To:"));   dr.addWidget(dt_w)
+        dr.addWidget(refresh_btn); dr.addWidget(export_btn); dr.addStretch()
+        lay.addLayout(dr)
+
+        sf = QFrame(); sf.setStyleSheet("QFrame{background:#ECFDF5;border-radius:8px;}")
+        sl2 = QHBoxLayout(sf); sl2.setContentsMargins(16, 8, 16, 8)
+        sl2.addWidget(sum_lbl); sl2.addStretch(); lay.addWidget(sf)
+        lay.addWidget(f)
+
+        tab._load_fn = _load
+        parent_tabs.addTab(tab, label)
+        return tab
 
     def _make_report_tab(self, tabs, tab_title, headers, tbl_attr, df_attr, dt_attr,
                           load_fn, summary_attr=None):
@@ -178,6 +280,8 @@ class ReportsPage(QWidget):
     def refresh(self):
         self._load_sales(); self._load_purchases(); self._load_pl()
         self._load_stock(); self._load_cashflow()
+        for tab in self._sum_tabs.values():
+            tab._load_fn()
 
     def _load_sales(self):
         df = self._sr_df.date().toString("yyyy-MM-dd")

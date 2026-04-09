@@ -1270,6 +1270,42 @@ class Database:
         profit = revenue - purchases
         return dict(revenue=revenue, purchases=purchases, profit=profit)
 
+    def get_period_summary(self, period, date_from=None, date_to=None):
+        """Returns sales/purchase totals grouped by day/week/month/year."""
+        fmt_map = {
+            "daily":   "%Y-%m-%d",
+            "weekly":  "%Y-W%W",
+            "monthly": "%Y-%m",
+            "yearly":  "%Y",
+        }
+        fmt = fmt_map.get(period, "%Y-%m-%d")
+        p_s, p_p = [], []
+        df_s, df_p = "", ""
+        if date_from:
+            df_s += " AND sale_date >= ?";     p_s.append(date_from)
+            df_p += " AND purchase_date >= ?"; p_p.append(date_from)
+        if date_to:
+            df_s += " AND sale_date <= ?";     p_s.append(date_to)
+            df_p += " AND purchase_date <= ?"; p_p.append(date_to)
+        sales = self.conn.execute(
+            f"SELECT strftime('{fmt}', sale_date) AS period, "
+            f"COALESCE(SUM(total),0) AS total FROM sales WHERE 1=1{df_s} "
+            "GROUP BY period ORDER BY period", p_s
+        ).fetchall()
+        purchases = self.conn.execute(
+            f"SELECT strftime('{fmt}', purchase_date) AS period, "
+            f"COALESCE(SUM(total),0) AS total FROM purchases WHERE 1=1{df_p} "
+            "GROUP BY period ORDER BY period", p_p
+        ).fetchall()
+        result = {}
+        for row in sales:
+            result.setdefault(row["period"], {"sales": 0.0, "purchases": 0.0})
+            result[row["period"]]["sales"] = row["total"]
+        for row in purchases:
+            result.setdefault(row["period"], {"sales": 0.0, "purchases": 0.0})
+            result[row["period"]]["purchases"] = row["total"]
+        return sorted(result.items())
+
     # ─── Sales Returns ────────────────────────────────────────────────────────
 
     def _next_sale_return(self):
