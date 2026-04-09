@@ -5,7 +5,9 @@ __pycache__/
 
 # C extensions
 *.so
-
+deb_pkg
+deb_pkg/
+deb_pkgs/
 # Distribution / packaging
 .Python
 build/
