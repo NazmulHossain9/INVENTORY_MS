@@ -345,8 +345,8 @@ class Database:
         total_sales      = c.execute("SELECT COALESCE(SUM(total),0) FROM sales").fetchone()[0]
         today_sales      = c.execute("SELECT COALESCE(SUM(total),0) FROM sales WHERE date(sale_date)=date('now','localtime')").fetchone()[0]
         total_purchases  = c.execute("SELECT COALESCE(SUM(total),0) FROM purchases").fetchone()[0]
-        receivable       = c.execute("SELECT COALESCE(SUM(balance),0) FROM customers WHERE balance>0").fetchone()[0]
-        payable          = c.execute("SELECT COALESCE(SUM(balance),0) FROM suppliers WHERE balance>0").fetchone()[0]
+        receivable       = c.execute("SELECT COALESCE(SUM(due_amount),0) FROM sales WHERE status IN ('partial','unpaid')").fetchone()[0]
+        payable          = c.execute("SELECT COALESCE(SUM(due_amount),0) FROM purchases WHERE status IN ('partial','unpaid')").fetchone()[0]
         unpaid_invoices  = c.execute("SELECT COUNT(*) FROM sales WHERE status IN ('partial','unpaid')").fetchone()[0]
         cash_balance     = self.get_cash_balance()
         return dict(

@@ -1,5 +1,8 @@
 # Inventory Management System (IMS)
 
+# admin
+# admin123
+
 A comprehensive PyQt6-based desktop application for managing inventory, sales, purchases, customers, suppliers, and accounting operations.
 
 ## Features
