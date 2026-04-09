@@ -128,9 +128,12 @@ class ProductsPage(QWidget):
         fl.addWidget(self.table); root.addWidget(f)
 
         ar = QHBoxLayout(); ar.setSpacing(8); ar.addStretch()
-        e = btn("Edit", SUCCESS); e.clicked.connect(self.edit_product)
-        d = btn("Delete", DANGER); d.clicked.connect(self.delete_product)
-        ar.addWidget(e); ar.addWidget(d); root.addLayout(ar)
+        inc = btn("＋  Add Stock",    SUCCESS); inc.clicked.connect(self.increment_stock)
+        dec = btn("－  Remove Stock", DANGER);  dec.clicked.connect(self.decrement_stock)
+        e   = btn("Edit",             "#6366F1"); e.clicked.connect(self.edit_product)
+        d   = btn("Delete",           "#94A3B8", "#374151"); d.clicked.connect(self.delete_product)
+        for w in [inc, dec, e, d]: ar.addWidget(w)
+        root.addLayout(ar)
 
         self._reload_cats()
 
@@ -165,6 +168,45 @@ class ProductsPage(QWidget):
         r = self.table.currentRow()
         if r < 0: QMessageBox.information(self,"Select","Select a product first."); return None
         return self._rows[r]
+
+    def increment_stock(self):
+        self._adjust_stock("IN")
+
+    def decrement_stock(self):
+        self._adjust_stock("OUT")
+
+    def _adjust_stock(self, direction):
+        row = self._selected()
+        if not row:
+            return
+        from PyQt6.QtWidgets import QInputDialog
+        current = row["quantity"]
+        label = (f"Add stock to  '{row['name']}'\n"
+                 f"Current stock: {current} {row['unit']}\n\n"
+                 f"Quantity to add:") if direction == "IN" else (
+                f"Remove stock from  '{row['name']}'\n"
+                f"Current stock: {current} {row['unit']}\n\n"
+                f"Quantity to remove:")
+        max_val = 999999 if direction == "IN" else current
+        if direction == "OUT" and current == 0:
+            QMessageBox.warning(self, "No Stock", f"'{row['name']}' has 0 units in stock.")
+            return
+        qty, ok = QInputDialog.getInt(self, "Adjust Stock", label, 1, 1, max_val)
+        if not ok:
+            return
+        try:
+            self.db.add_transaction(row["id"], direction, qty, 0,
+                                    f"Manual {'addition' if direction == 'IN' else 'removal'}")
+            new_qty = current + qty if direction == "IN" else current - qty
+            QMessageBox.information(
+                self, "Stock Updated",
+                f"'{row['name']}'\n"
+                f"{'Added' if direction == 'IN' else 'Removed'}:  {qty} {row['unit']}\n"
+                f"New stock:  {new_qty} {row['unit']}"
+            )
+            self.refresh()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
 
     def add_product(self):
         dlg = ProductDialog(self, self.db)

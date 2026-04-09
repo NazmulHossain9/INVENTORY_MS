@@ -1,4 +1,5 @@
 import sqlite3
+import hashlib
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventory.db")
@@ -215,6 +216,23 @@ class Database:
                 unit_price  REAL NOT NULL,
                 total       REAL NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS transactions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id  INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                type        TEXT NOT NULL,
+                quantity    INTEGER NOT NULL,
+                price       REAL DEFAULT 0,
+                note        TEXT,
+                created_at  TEXT DEFAULT (datetime('now','localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS users (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                username   TEXT NOT NULL UNIQUE,
+                password   TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now','localtime'))
+            );
         """)
         self.conn.commit()
 
@@ -263,7 +281,23 @@ class Database:
                     ("4002","Other Income",         "REVENUE",   "CR","Miscellaneous income"),
                 ],
             )
+        # Default admin user (password: admin123)
+        cur = self.conn.execute("SELECT COUNT(*) FROM users")
+        if cur.fetchone()[0] == 0:
+            hashed = hashlib.sha256("admin123".encode()).hexdigest()
+            self.conn.execute(
+                "INSERT INTO users (username, password) VALUES (?, ?)",
+                ("admin", hashed)
+            )
+
         self.conn.commit()
+
+    def check_credentials(self, username, password):
+        hashed = hashlib.sha256(password.encode()).hexdigest()
+        row = self.conn.execute(
+            "SELECT id FROM users WHERE username=? AND password=?", (username, hashed)
+        ).fetchone()
+        return row is not None
 
     # ─── Settings ─────────────────────────────────────────────────────────────
 
@@ -1010,10 +1044,10 @@ class Database:
         p = []
         date_filter = ""
         if date_from:
-            date_filter += " AND s.sale_date >= ?"
+            date_filter += " AND sale_date >= ?"
             p.append(date_from)
         if date_to:
-            date_filter += " AND s.sale_date <= ?"
+            date_filter += " AND sale_date <= ?"
             p.append(date_to)
         revenue = self.conn.execute(
             f"SELECT COALESCE(SUM(total),0) FROM sales WHERE 1=1{date_filter}", p
@@ -1320,6 +1354,52 @@ class Database:
         )
         self.conn.commit()
         return return_no
+
+    # ─── Manual Transactions ──────────────────────────────────────────────────
+
+    def get_all_transactions(self, search="", tx_type=None):
+        q = """
+            SELECT t.id, p.name AS product, p.sku, t.type,
+                   t.quantity, t.price, t.note, t.created_at
+            FROM transactions t
+            JOIN products p ON p.id = t.product_id
+            WHERE 1=1
+        """
+        params = []
+        if search:
+            q += " AND (p.name LIKE ? OR p.sku LIKE ? OR t.note LIKE ?)"
+            params += [f"%{search}%"] * 3
+        if tx_type:
+            q += " AND t.type=?"
+            params.append(tx_type)
+        return self.conn.execute(q + " ORDER BY t.id DESC", params).fetchall()
+
+    def add_transaction(self, product_id, tx_type, quantity, price, note):
+        prod = self.get_product_by_id(product_id)
+        if not prod:
+            raise ValueError("Product not found")
+        if tx_type == "OUT" and prod["quantity"] < quantity:
+            raise ValueError(f"Insufficient stock. Available: {prod['quantity']}")
+        self.conn.execute(
+            "INSERT INTO transactions (product_id,type,quantity,price,note) VALUES (?,?,?,?,?)",
+            (product_id, tx_type, quantity, price, note)
+        )
+        delta = quantity if tx_type == "IN" else -quantity
+        new_qty = prod["quantity"] + delta
+        self.conn.execute(
+            "UPDATE products SET quantity=?,updated_at=datetime('now','localtime') WHERE id=?",
+            (new_qty, product_id)
+        )
+        self._record_stock_movement(
+            product_id, "MANUAL", quantity, new_qty,
+            "manual", None, note or f"Manual stock {tx_type.lower()}"
+        )
+        self.conn.commit()
+
+    # ─── Company Info ─────────────────────────────────────────────────────────
+
+    def get_company_info(self):
+        return {"name": self.get_setting("company_name", "My Company")}
 
     def close(self):
         self.conn.close()

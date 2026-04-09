@@ -1,7 +1,8 @@
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea
+    QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea,
+    QLineEdit, QMessageBox, QDialog
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -21,6 +22,7 @@ from pages.reports         import ReportsPage
 from pages.categories      import CategoriesPage
 from pages.sales_return    import SalesReturnPage
 from pages.purchase_return import PurchaseReturnPage
+from pages.transactions    import TransactionsPage
 
 
 APP_STYLE = """
@@ -45,6 +47,7 @@ NAV_ITEMS = [
     (None, None,               "INVENTORY"),
     ("📦", "Products",         None),
     ("📈", "Stock",            None),
+    ("🔄", "Transactions",     None),
     (None, None,               "TRADING"),
     ("🛒", "Sales",            None),
     ("↩", "Sales Return",     None),
@@ -158,15 +161,112 @@ class Sidebar(QFrame):
             btn.set_active(lbl == label)
 
 
+class LoginDialog(QDialog):
+    STYLE = """
+        QDialog { background: #1E293B; }
+        QLabel#title {
+            color: white; font-size: 22px; font-weight: 800;
+        }
+        QLabel#subtitle { color: #64748B; font-size: 12px; }
+        QLabel#field { color: #94A3B8; font-size: 12px; font-weight: 600; }
+        QLabel#error { color: #F87171; font-size: 12px; }
+        QLineEdit {
+            background: #0F172A; color: white; border: 1px solid #334155;
+            border-radius: 8px; padding: 10px 14px; font-size: 13px;
+        }
+        QLineEdit:focus { border: 1px solid #4F46E5; }
+        QPushButton#login_btn {
+            background: #4F46E5; color: white; border: none;
+            border-radius: 8px; padding: 11px; font-size: 14px; font-weight: 700;
+        }
+        QPushButton#login_btn:hover { background: #4338CA; }
+        QPushButton#login_btn:pressed { background: #3730A3; }
+    """
+
+    def __init__(self, db: "Database"):
+        super().__init__()
+        self.db = db
+        self.setWindowTitle("Login – IMS")
+        self.setFixedSize(380, 340)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.MSWindowsFixedSizeDialogHint)
+        self.setStyleSheet(self.STYLE)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 36, 40, 36)
+        layout.setSpacing(0)
+
+        title = QLabel("⬛  IMS")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        subtitle = QLabel("Inventory Management System")
+        subtitle.setObjectName("subtitle")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addSpacing(28)
+
+        lbl_user = QLabel("USERNAME")
+        lbl_user.setObjectName("field")
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter username")
+
+        lbl_pass = QLabel("PASSWORD")
+        lbl_pass.setObjectName("field")
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+
+        layout.addWidget(lbl_user)
+        layout.addSpacing(4)
+        layout.addWidget(self.username_input)
+        layout.addSpacing(14)
+        layout.addWidget(lbl_pass)
+        layout.addSpacing(4)
+        layout.addWidget(self.password_input)
+        layout.addSpacing(6)
+
+        self.error_label = QLabel("")
+        self.error_label.setObjectName("error")
+        self.error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.error_label)
+        layout.addSpacing(14)
+
+        btn = QPushButton("Sign In")
+        btn.setObjectName("login_btn")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(self._attempt_login)
+        layout.addWidget(btn)
+
+        self.password_input.returnPressed.connect(self._attempt_login)
+        self.username_input.returnPressed.connect(self.password_input.setFocus)
+
+    def _attempt_login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        if not username or not password:
+            self.error_label.setText("Please enter username and password.")
+            return
+        if self.db.check_credentials(username, password):
+            self.accept()
+        else:
+            self.error_label.setText("Invalid username or password.")
+            self.password_input.clear()
+            self.password_input.setFocus()
+
+
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, db: "Database"):
         super().__init__()
         self.setWindowTitle("Inventory Management System")
         self.resize(1280, 780)
         self.setMinimumSize(960, 620)
         self.setStyleSheet(APP_STYLE)
 
-        self.db = Database()
+        self.db = db
 
         root = QWidget(); self.setCentralWidget(root)
         root_layout = QHBoxLayout(root)
@@ -191,6 +291,7 @@ class MainWindow(QMainWindow):
             "Dashboard":       DashboardPage(self.db),
             "Products":        ProductsPage(self.db),
             "Stock":           StockPage(self.db),
+            "Transactions":    TransactionsPage(self.db),
             "Sales":           SalesPage(self.db),
             "Sales Return":    SalesReturnPage(self.db),
             "Purchases":       PurchasesPage(self.db),
@@ -231,7 +332,13 @@ def main():
     app.setStyle("Fusion")
     font = QFont("Segoe UI", 10)
     app.setFont(font)
-    window = MainWindow()
+
+    db = Database()
+    login = LoginDialog(db)
+    if login.exec() != QDialog.DialogCode.Accepted:
+        sys.exit(0)
+
+    window = MainWindow(db)
     window.show()
     sys.exit(app.exec())
 
