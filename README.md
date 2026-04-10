@@ -277,3 +277,11 @@ For issues or feature requests, contact the development team.
 
 
 
+# Buil for Linux
+```
+chmod +x build.sh
+./build.sh
+python build.py --target deb --name inventory_ms
+sudo dpkg -i inventory_ms_2.0.0_amd64.deb
+sudo apt install -f
+```

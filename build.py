@@ -79,6 +79,11 @@ def clean_build():
 
 
 def build_executable(name, windowed=True):
+    exe_path = DIST_DIR / name
+    if exe_path.exists():
+        print(f'Executable {exe_path} already exists. Skipping build.')
+        return True
+
     generate_platform_icons()
     cmd = get_pyinstaller_cmd() + [
         '--onefile',
@@ -121,23 +126,38 @@ def build_deb(name, version):
 
     exe_path = DIST_DIR / name
     if not exe_path.exists():
-        print(f'Executable not found: {exe_path}')
-        return False
+        print(f'Executable not found: {exe_path}. Building it first...')
+        if not build_executable(name, windowed=True):
+            return False
 
     pkg_root = ROOT / 'deb_pkg'
     debian_dir = pkg_root / 'DEBIAN'
     bin_dir = pkg_root / 'usr' / 'bin'
+    applications_dir = pkg_root / 'usr' / 'share' / 'applications'
 
     if pkg_root.exists():
         shutil.rmtree(pkg_root)
     bin_dir.mkdir(parents=True, exist_ok=True)
+    applications_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(exe_path, bin_dir / name)
     os.chmod(bin_dir / name, 0o755)
+
+    package_name = name.lower().replace('_', '-')
+
+    # Create .desktop file
+    desktop_file = applications_dir / f'{package_name}.desktop'
+    desktop_text = f"""[Desktop Entry]
+Name=Inventory Management System
+Exec={name}
+Type=Application
+Categories=Office;Utility;
+Terminal=false
+"""
+    desktop_file.write_text(desktop_text, encoding='utf-8')
 
     control = debian_dir / 'control'
     control.parent.mkdir(parents=True, exist_ok=True)
 
-    package_name = name.lower().replace('_', '-')
     control_text = f"""Package: {package_name}
 Version: {version}
 Section: utils

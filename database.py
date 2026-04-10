@@ -1,8 +1,35 @@
 import sqlite3
 import hashlib
 import os
+import sys
+from pathlib import Path
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inventory.db")
+def get_data_dir():
+    """Get the user data directory for the application."""
+    if getattr(sys, 'frozen', False):
+        # Running as bundled executable
+        app_name = "inventory_ms"
+    else:
+        # Running from source
+        app_name = "inventory_ms"
+
+    # Get platform-specific data directory
+    if os.name == 'nt':  # Windows
+        data_dir = Path(os.environ.get('APPDATA', '')) / app_name
+    elif os.name == 'posix':  # Linux/macOS
+        if sys.platform == 'darwin':  # macOS
+            data_dir = Path.home() / 'Library' / 'Application Support' / app_name
+        else:  # Linux
+            data_dir = Path.home() / '.local' / 'share' / app_name
+    else:
+        # Fallback
+        data_dir = Path.home() / app_name
+
+    # Create directory if it doesn't exist
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+DB_PATH = get_data_dir() / "inventory.db"
 
 
 class Database:
