@@ -70,7 +70,7 @@ class DashboardPage(QWidget):
         self.c_recv      = StatCard("Receivable (Due)",  color=DANGER)
         self.c_pay       = StatCard("Payable (Due)",     color=ORANGE)
         self.c_unpaid    = StatCard("Unpaid Invoices",   color=DANGER)
-        self.c_profit    = StatCard("Gross Profit Est.", color=PURPLE)
+        self.c_profit    = StatCard("Profit / Loss",     color=SUCCESS)
         for i, c in enumerate([self.c_cash, self.c_sales, self.c_today, self.c_purchases,
                                 self.c_recv, self.c_pay, self.c_unpaid, self.c_profit]):
             r1.addWidget(c, i//4, i%4)
@@ -126,7 +126,11 @@ class DashboardPage(QWidget):
         self.c_recv.set_value(f"${s['receivable']:,.2f}")
         self.c_pay.set_value(f"${s['payable']:,.2f}")
         self.c_unpaid.set_value(str(s['unpaid_invoices']))
-        profit = s['total_sales'] - s['total_purchases']
+        profit = s['gross_profit']
+        profit_color = SUCCESS if profit >= 0 else DANGER
+        self.c_profit._value.setStyleSheet(
+            f"color:{profit_color};font-size:26px;font-weight:700;background:transparent;border:none;"
+        )
         self.c_profit.set_value(f"${profit:,.2f}")
         self.c_prods.set_value(s['total_products'])
         self.c_stock.set_value(f"{s['total_stock']:,}")

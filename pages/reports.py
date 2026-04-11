@@ -87,10 +87,11 @@ class ReportsPage(QWidget):
         # P&L cards
         pl_cards = QHBoxLayout(); pl_cards.setSpacing(16)
         for attr, title, color in [
-            ("_pl_rev",  "Total Revenue",     SUCCESS),
-            ("_pl_pur",  "Total Purchases",   WARNING),
-            ("_pl_prof", "Gross Profit",      PRIMARY),
-            ("_pl_marg", "Profit Margin",     INFO),
+            ("_pl_rev",  "Total Revenue",        SUCCESS),
+            ("_pl_pur",  "Total Purchases",       WARNING),
+            ("_pl_prof", "Gross Profit",          PRIMARY),
+            ("_pl_gp",   "Gross Profit / Loss",   SUCCESS),
+            ("_pl_marg", "Profit Margin",         INFO),
         ]:
             f = QFrame(); f.setStyleSheet(f"QFrame{{background:white;border-radius:12px;border-left:5px solid {color};}}")
             fl = QVBoxLayout(f); fl.setContentsMargins(16,12,16,12); fl.setSpacing(4)
@@ -101,7 +102,7 @@ class ReportsPage(QWidget):
 
         # Breakdown table
         pl_f = card_frame(); pl_fl = QVBoxLayout(pl_f); pl_fl.setContentsMargins(16,14,16,14)
-        self.tbl_pl = QTableWidget(5, 3)
+        self.tbl_pl = QTableWidget(7, 3)
         self.tbl_pl.setHorizontalHeaderLabels(["Description","Amount","% of Revenue"])
         self.tbl_pl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tbl_pl.verticalHeader().setVisible(False)
@@ -603,23 +604,37 @@ class ReportsPage(QWidget):
         dt = self._pl_dt.date().toString("yyyy-MM-dd")
         pl = self.db.get_profit_loss(df, dt)
         rev = pl["revenue"]; pur = pl["purchases"]; profit = pl["profit"]
+        cogs = pl["cogs"]; gross_profit = pl["gross_profit"]
         margin = (profit / rev * 100) if rev > 0 else 0
+        gp_margin = (gross_profit / rev * 100) if rev > 0 else 0
         self._pl_rev.setText(f"${rev:,.2f}")
         self._pl_pur.setText(f"${pur:,.2f}")
         self._pl_prof.setText(f"${profit:,.2f}")
         self._pl_prof.setStyleSheet(f"font-size:24px;font-weight:700;color:{SUCCESS if profit>=0 else DANGER};background:transparent;border:none;")
+        self._pl_gp.setText(f"${gross_profit:,.2f}")
+        self._pl_gp.setStyleSheet(f"font-size:24px;font-weight:700;color:{SUCCESS if gross_profit>=0 else DANGER};background:transparent;border:none;")
         self._pl_marg.setText(f"{margin:.1f}%")
         rows = [
-            ("Revenue", rev, 100.0),
-            ("Cost of Purchases", pur, (pur/rev*100) if rev > 0 else 0),
-            ("Gross Profit", profit, margin),
-            ("", "", ""),
-            ("Cash Balance", self.db.get_cash_balance(), ""),
+            ("Revenue",               rev,          100.0),
+            ("Cost of Purchases",     pur,          (pur/rev*100) if rev > 0 else 0),
+            ("Gross Profit",          profit,       margin),
+            ("",                      "",           ""),
+            ("Cost of Goods Sold",    cogs,         (cogs/rev*100) if rev > 0 else 0),
+            ("Profit or Loss",   gross_profit, gp_margin),
+            ("Cash Balance",          self.db.get_cash_balance(), ""),
         ]
         for i, (desc, amt, pct) in enumerate(rows):
-            self.tbl_pl.setItem(i, 0, QTableWidgetItem(str(desc)))
-            self.tbl_pl.setItem(i, 1, QTableWidgetItem(f"${amt:,.2f}" if isinstance(amt, float) else ""))
-            self.tbl_pl.setItem(i, 2, QTableWidgetItem(f"{pct:.1f}%" if isinstance(pct, float) else ""))
+            d_item = QTableWidgetItem(str(desc))
+            a_item = QTableWidgetItem(f"${amt:,.2f}" if isinstance(amt, float) else "")
+            p_item = QTableWidgetItem(f"{pct:.1f}%" if isinstance(pct, float) else "")
+            if desc == "Gross Profit / Loss" and isinstance(amt, float):
+                color = QColor(SUCCESS if amt >= 0 else DANGER)
+                for it in (d_item, a_item, p_item):
+                    it.setForeground(color)
+                    it.setFont(QFont("", -1, QFont.Weight.Bold))
+            self.tbl_pl.setItem(i, 0, d_item)
+            self.tbl_pl.setItem(i, 1, a_item)
+            self.tbl_pl.setItem(i, 2, p_item)
 
     def _load_stock(self):
         rows = self.db.get_stock_summary()

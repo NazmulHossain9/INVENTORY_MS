@@ -604,12 +604,19 @@ class Database:
         payable          = c.execute("SELECT COALESCE(SUM(due_amount),0) FROM purchases WHERE status IN ('partial','unpaid')").fetchone()[0]
         unpaid_invoices  = c.execute("SELECT COUNT(*) FROM sales WHERE status IN ('partial','unpaid')").fetchone()[0]
         cash_balance     = self.get_cash_balance()
+        pl_row = c.execute("""
+            SELECT COALESCE(SUM(si.total), 0)                   AS revenue,
+                   COALESCE(SUM(si.quantity * p.cost_price), 0) AS cogs
+            FROM sale_items si
+            JOIN products p ON p.id = si.product_id
+        """).fetchone()
+        gross_profit = pl_row["revenue"] - pl_row["cogs"]
         return dict(
             total_products=total_products, total_stock=total_stock, low_stock=low_stock,
             stock_value=stock_value, total_customers=total_customers, total_suppliers=total_suppliers,
             total_sales=total_sales, today_sales=today_sales, total_purchases=total_purchases,
             receivable=receivable, payable=payable, unpaid_invoices=unpaid_invoices,
-            cash_balance=cash_balance,
+            cash_balance=cash_balance, gross_profit=gross_profit,
         )
 
     def get_recent_sales(self, limit=8):
@@ -1315,7 +1322,19 @@ class Database:
             f"SELECT COALESCE(SUM(total),0) FROM purchases WHERE 1=1{df2}", p2
         ).fetchone()[0]
         profit = revenue - purchases
-        return dict(revenue=revenue, purchases=purchases, profit=profit)
+        # Gross Profit = Sale Revenue − Cost of Goods Sold (cost_price × qty per item)
+        gp_row = self.conn.execute(f"""
+            SELECT COALESCE(SUM(si.total), 0)                   AS rev,
+                   COALESCE(SUM(si.quantity * p.cost_price), 0) AS cogs
+            FROM sale_items si
+            JOIN products p  ON p.id  = si.product_id
+            JOIN sales    s  ON s.id  = si.sale_id
+            WHERE 1=1{date_filter}
+        """, p).fetchone()
+        gross_profit = gp_row["rev"] - gp_row["cogs"]
+        cogs = gp_row["cogs"]
+        return dict(revenue=revenue, purchases=purchases, profit=profit,
+                    cogs=cogs, gross_profit=gross_profit)
 
     def get_period_summary(self, period, date_from=None, date_to=None):
         """Returns sales/purchase totals grouped by day/week/month/year."""
