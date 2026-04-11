@@ -241,7 +241,70 @@ class ProductDialog(QDialog):
         cat_col.addWidget(self._cat_create_panel)
 
         form.addRow("Category",    cat_col)
-        form.addRow("Supplier",    self.supplier)
+
+        # Supplier row: combo + "+ New" button + inline create panel
+        sup_col = QVBoxLayout(); sup_col.setSpacing(4)
+
+        sup_top = QHBoxLayout(); sup_top.setSpacing(6)
+        sup_top.addWidget(self.supplier)
+        self._new_sup_btn = QPushButton("+ New")
+        self._new_sup_btn.setFixedSize(60, 32)
+        self._new_sup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_sup_btn.setStyleSheet("""
+            QPushButton {
+                background: #FFF7ED; color: #EA580C;
+                border: 1.5px solid #FED7AA; border-radius: 6px;
+                font-size: 12px; font-weight: 700;
+            }
+            QPushButton:hover { background: #FFEDD5; }
+        """)
+        self._new_sup_btn.clicked.connect(self._toggle_new_sup)
+        sup_top.addWidget(self._new_sup_btn)
+        sup_col.addLayout(sup_top)
+
+        # Inline create panel (hidden by default)
+        self._sup_create_panel = QFrame()
+        self._sup_create_panel.setStyleSheet(
+            "QFrame{background:#FFF7ED;border-radius:7px;border:1px solid #FDBA74;}"
+        )
+        sp_lay = QHBoxLayout(self._sup_create_panel)
+        sp_lay.setContentsMargins(8, 6, 8, 6); sp_lay.setSpacing(6)
+        self._new_sup_input = QLineEdit()
+        self._new_sup_input.setPlaceholderText("New supplier name…")
+        self._new_sup_input.setStyleSheet(FIELD_STYLE)
+        self._new_sup_input.setFixedHeight(32)
+        self._new_sup_input.returnPressed.connect(self._create_supplier)
+        create_sup_btn = QPushButton("Create")
+        create_sup_btn.setFixedSize(60, 32)
+        create_sup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        create_sup_btn.setStyleSheet("""
+            QPushButton {
+                background: #F97316; color: white;
+                border: none; border-radius: 6px;
+                font-size: 12px; font-weight: 700;
+            }
+            QPushButton:hover { background: #EA580C; }
+        """)
+        create_sup_btn.clicked.connect(self._create_supplier)
+        cancel_sup_btn = QPushButton("✕")
+        cancel_sup_btn.setFixedSize(32, 32)
+        cancel_sup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_sup_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #94A3B8;
+                border: 1px solid #CBD5E1; border-radius: 6px;
+                font-size: 13px; font-weight: 700;
+            }
+            QPushButton:hover { color: #EF4444; border-color: #FCA5A5; }
+        """)
+        cancel_sup_btn.clicked.connect(self._hide_new_sup)
+        sp_lay.addWidget(self._new_sup_input)
+        sp_lay.addWidget(create_sup_btn)
+        sp_lay.addWidget(cancel_sup_btn)
+        self._sup_create_panel.setVisible(False)
+        sup_col.addWidget(self._sup_create_panel)
+
+        form.addRow("Supplier",    sup_col)
         form.addRow("Unit",        self.unit)
         pr = QHBoxLayout()
         pr.addWidget(self.cost_price)
@@ -335,6 +398,47 @@ class ProductDialog(QDialog):
         self.category.blockSignals(False)
         self.category.setCurrentIndex(new_index)
         self._hide_new_cat()
+
+    # ── supplier helpers ──────────────────────────────────────────────────────
+
+    def _toggle_new_sup(self):
+        visible = self._sup_create_panel.isVisible()
+        self._sup_create_panel.setVisible(not visible)
+        if not visible:
+            self._new_sup_input.setFocus()
+            self._new_sup_btn.setText("✕ Cancel")
+        else:
+            self._new_sup_input.clear()
+            self._new_sup_btn.setText("+ New")
+
+    def _hide_new_sup(self):
+        self._sup_create_panel.setVisible(False)
+        self._new_sup_input.clear()
+        self._new_sup_btn.setText("+ New")
+
+    def _create_supplier(self):
+        name = self._new_sup_input.text().strip()
+        if not name:
+            self._new_sup_input.setFocus()
+            return
+        try:
+            self.db.add_supplier(name)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+            return
+        # Repopulate combo and select the newly created supplier
+        self._sups = [{"id": None, "name": "— None —"}] + \
+                     [dict(r) for r in self.db.get_all_suppliers()]
+        self.supplier.blockSignals(True)
+        self.supplier.clear()
+        new_index = 0
+        for i, s in enumerate(self._sups):
+            self.supplier.addItem(s["name"], s["id"])
+            if s["name"] == name:
+                new_index = i
+        self.supplier.blockSignals(False)
+        self.supplier.setCurrentIndex(new_index)
+        self._hide_new_sup()
 
     # ── image helpers ─────────────────────────────────────────────────────────
 
