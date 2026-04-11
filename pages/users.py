@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QVBoxLayout as QVL, QLineEdit, QMessageBox, QFrame, QComboBox
+    QDialog, QVBoxLayout as QVL, QLineEdit, QMessageBox, QFrame, QComboBox,
+    QFileDialog
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtCore import Qt, QByteArray
+from PyQt6.QtGui import QColor, QFont, QPixmap, QPainter, QPainterPath
 from styles import (PRIMARY, DANGER, SUCCESS, WARNING, TEXT_DARK, TEXT_MID, TEXT_LIGHT,
                     TABLE_STYLE, BG_CARD, BORDER, FIELD_STYLE)
 
@@ -32,7 +33,59 @@ _DIALOG_STYLE = """
         border-radius: 8px; padding: 10px; font-size: 13px;
     }
     QPushButton#cancel:hover { color: #94A3B8; border-color: #475569; }
+    QPushButton#photo_btn {
+        background: #1E3A5F; color: #93C5FD; border: 1px dashed #3B82F6;
+        border-radius: 8px; padding: 8px; font-size: 12px;
+    }
+    QPushButton#photo_btn:hover { background: #1E40AF; color: white; }
 """
+
+
+def _make_avatar(data: bytes | None, size: int = 40) -> QLabel:
+    """Return a QLabel showing a rounded avatar from raw image bytes, or an initials placeholder."""
+    lbl = QLabel()
+    lbl.setFixedSize(size, size)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if data:
+        pm = QPixmap()
+        pm.loadFromData(QByteArray(data))
+        if not pm.isNull():
+            pm = pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                           Qt.TransformationMode.SmoothTransformation)
+            # crop to circle
+            rounded = QPixmap(size, size)
+            rounded.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, size, size)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pm)
+            painter.end()
+            lbl.setPixmap(rounded)
+            return lbl
+    # fallback: coloured circle
+    lbl.setStyleSheet(f"""
+        QLabel {{
+            background: #4F46E5; color: white;
+            border-radius: {size//2}px;
+            font-size: {size//3}px; font-weight: 700;
+        }}
+    """)
+    lbl.setText("?")
+    return lbl
+
+
+def _pick_photo_bytes(parent=None) -> bytes | None:
+    """Open a file dialog and return the raw bytes of the chosen image, or None."""
+    path, _ = QFileDialog.getOpenFileName(
+        parent, "Select Profile Photo", "",
+        "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
+    )
+    if not path:
+        return None
+    with open(path, "rb") as f:
+        return f.read()
 
 
 def _btn(text, color=PRIMARY):
@@ -68,8 +121,9 @@ class AddUserDialog(QDialog):
     def __init__(self, db, parent=None):
         super().__init__(parent)
         self.db = db
+        self._photo_bytes: bytes | None = None
         self.setWindowTitle("Add New User")
-        self.setFixedSize(360, 420)
+        self.setFixedSize(360, 500)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.MSWindowsFixedSizeDialogHint)
         self.setStyleSheet(_DIALOG_STYLE)
         self._build()
@@ -82,8 +136,35 @@ class AddUserDialog(QDialog):
         title = QLabel("Add New User"); title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(title)
-        lay.addSpacing(20)
+        lay.addSpacing(16)
 
+        # ── Photo picker ──────────────────────────────────────────────────────
+        photo_row = QHBoxLayout(); photo_row.setSpacing(12)
+        self._avatar_preview = QLabel()
+        self._avatar_preview.setFixedSize(56, 56)
+        self._avatar_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._avatar_preview.setStyleSheet(
+            "background:#0F172A;border-radius:28px;color:#64748B;font-size:22px;"
+        )
+        self._avatar_preview.setText("?")
+        photo_row.addWidget(self._avatar_preview)
+
+        photo_col = QVBoxLayout(); photo_col.setSpacing(4)
+        photo_lbl = QLabel("PROFILE PHOTO  (optional)")
+        pick_btn = QPushButton("Choose Photo"); pick_btn.setObjectName("photo_btn")
+        pick_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        pick_btn.setFixedHeight(34)
+        pick_btn.clicked.connect(self._pick_photo)
+        self._photo_name_lbl = QLabel("No photo selected")
+        self._photo_name_lbl.setStyleSheet("color:#475569;font-size:10px;letter-spacing:0px;")
+        photo_col.addWidget(photo_lbl)
+        photo_col.addWidget(pick_btn)
+        photo_col.addWidget(self._photo_name_lbl)
+        photo_row.addLayout(photo_col)
+        lay.addLayout(photo_row)
+        lay.addSpacing(14)
+
+        # ── Fields ───────────────────────────────────────────────────────────
         for attr, label, ph, echo in [
             ("_inp_user", "USERNAME",         "Enter username",        False),
             ("_inp_pass", "PASSWORD",         "At least 4 characters", True),
@@ -130,6 +211,31 @@ class AddUserDialog(QDialog):
         self._inp_pass.returnPressed.connect(self._inp_conf.setFocus)
         self._inp_user.returnPressed.connect(self._inp_pass.setFocus)
 
+    def _pick_photo(self):
+        data = _pick_photo_bytes(self)
+        if data is None:
+            return
+        self._photo_bytes = data
+        # update preview
+        pm = QPixmap()
+        pm.loadFromData(QByteArray(data))
+        if not pm.isNull():
+            pm = pm.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                           Qt.TransformationMode.SmoothTransformation)
+            rounded = QPixmap(56, 56)
+            rounded.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addEllipse(0, 0, 56, 56)
+            painter.setClipPath(path)
+            painter.drawPixmap(0, 0, pm)
+            painter.end()
+            self._avatar_preview.setPixmap(rounded)
+            self._avatar_preview.setStyleSheet("border-radius:28px;")
+        self._photo_name_lbl.setText("Photo selected")
+        self._photo_name_lbl.setStyleSheet("color:#34D399;font-size:10px;letter-spacing:0px;")
+
     def _submit(self):
         username = self._inp_user.text().strip()
         password = self._inp_pass.text()
@@ -144,7 +250,7 @@ class AddUserDialog(QDialog):
             self._inp_conf.clear(); self._inp_conf.setFocus()
             return
         try:
-            self.db.register_user(username, password, role)
+            self.db.register_user(username, password, role, self._photo_bytes)
             self.accept()
         except ValueError as e:
             self._err.setText(str(e))
@@ -258,9 +364,9 @@ class UsersPage(QWidget):
         card_lay.addWidget(lbl)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
-            ["#", "Username", "Role", "Status", "Actions", "Created At"]
+            ["Photo", "#", "Username", "Role", "Status", "Actions", "Created At"]
         )
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -269,13 +375,14 @@ class UsersPage(QWidget):
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(3, 90)
-        self.table.setColumnWidth(4, 210)
+        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(0, 60)
+        self.table.setColumnWidth(1, 50)
+        self.table.setColumnWidth(4, 90)
+        self.table.setColumnWidth(5, 250)
         self.table.setStyleSheet(TABLE_STYLE)
-        self.table.setRowHeight(0, 40)
         card_lay.addWidget(self.table)
         root.addWidget(card)
 
@@ -285,40 +392,53 @@ class UsersPage(QWidget):
         ROLE_COLOR = {"admin": "#4F46E5", "staff": "#059669"}
 
         for r, u in enumerate(users):
-            self.table.setRowHeight(r, 40)
+            self.table.setRowHeight(r, 50)
             uid       = u["id"]
             uname     = u["username"]
             role_name = u["role_name"] or u["role"]
             created   = u["created_at"]
             is_active = bool(u["is_active"])
+            photo_data = u["photo"]
+
+            # photo avatar
+            avatar = _make_avatar(photo_data, size=38)
+            cell_w = QWidget()
+            cell_l = QHBoxLayout(cell_w)
+            cell_l.setContentsMargins(10, 6, 6, 6)
+            cell_l.addWidget(avatar)
+            self.table.setCellWidget(r, 0, cell_w)
 
             # # col
             n_item = QTableWidgetItem(str(uid))
             n_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(r, 0, n_item)
+            self.table.setItem(r, 1, n_item)
 
             # username
-            self.table.setItem(r, 1, QTableWidgetItem(uname))
+            self.table.setItem(r, 2, QTableWidgetItem(uname))
 
             # role
             role_item = QTableWidgetItem(role_name)
             role_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             role_item.setForeground(QColor(ROLE_COLOR.get(role_name, "#374151")))
             role_item.setFont(QFont("", -1, QFont.Weight.Bold))
-            self.table.setItem(r, 2, role_item)
+            self.table.setItem(r, 3, role_item)
 
             # status badge
             status_item = QTableWidgetItem("Active" if is_active else "Inactive")
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(QColor(SUCCESS if is_active else DANGER))
             status_item.setFont(QFont("", -1, QFont.Weight.Bold))
-            self.table.setItem(r, 3, status_item)
+            self.table.setItem(r, 4, status_item)
 
-            # action buttons widget
+            # action buttons
             cell = QWidget()
             cell_lay = QHBoxLayout(cell)
             cell_lay.setContentsMargins(4, 4, 4, 4)
             cell_lay.setSpacing(6)
+
+            photo_btn = _icon_btn("📷 Photo", "#0891B2")
+            photo_btn.setToolTip("Upload profile photo")
+            photo_btn.clicked.connect(lambda _, i=uid: self._upload_photo(i))
 
             pw_btn = _icon_btn("🔑 Password", "#4F46E5")
             pw_btn.setToolTip(f"Change password for {uname}")
@@ -330,21 +450,29 @@ class UsersPage(QWidget):
             tog_btn.setToolTip("Deactivate user" if is_active else "Activate user")
             tog_btn.clicked.connect(lambda _, i=uid, a=is_active: self._toggle_active(i, a))
 
+            cell_lay.addWidget(photo_btn)
             cell_lay.addWidget(pw_btn)
             cell_lay.addWidget(tog_btn)
             cell_lay.addStretch()
-            self.table.setCellWidget(r, 4, cell)
+            self.table.setCellWidget(r, 5, cell)
 
             # created at
             created_item = QTableWidgetItem(created)
             created_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(r, 5, created_item)
+            self.table.setItem(r, 6, created_item)
 
     def _add_user(self):
         dlg = AddUserDialog(self.db, self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.refresh()
             QMessageBox.information(self, "Success", "User created successfully.")
+
+    def _upload_photo(self, user_id):
+        data = _pick_photo_bytes(self)
+        if data is None:
+            return
+        self.db.set_user_photo(user_id, data)
+        self.refresh()
 
     def _change_password(self, user_id, username):
         dlg = ChangePasswordDialog(self.db, user_id, username, self)

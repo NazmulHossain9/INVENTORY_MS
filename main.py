@@ -4,8 +4,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea,
     QLineEdit, QMessageBox, QDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QByteArray
+from PyQt6.QtGui import QFont, QPixmap, QPainter, QPainterPath
 
 from database import Database
 from pages.dashboard    import DashboardPage
@@ -173,16 +173,56 @@ class Sidebar(QFrame):
         user_frame.setStyleSheet("background: #0F172A; border-top: 1px solid #334155;")
         user_layout = QVBoxLayout(user_frame)
         user_layout.setContentsMargins(14, 10, 14, 4)
-        user_layout.setSpacing(2)
+        user_layout.setSpacing(4)
 
         uname = (user or {}).get("username", "—")
         urole = ((user or {}).get("role_name") or (user or {}).get("role", "staff")).capitalize()
-        name_lbl = QLabel(f"👤  {uname}")
-        name_lbl.setStyleSheet("color: #E2E8F0; font-size: 12px; font-weight: 600; background: transparent;")
+        photo_data = (user or {}).get("photo")
+
+        # Avatar row: circular photo (if exists) + name/role stacked beside it
+        avatar_row = QHBoxLayout(); avatar_row.setSpacing(10); avatar_row.setContentsMargins(0,0,0,0)
+
+        SIZE = 40
+        avatar_lbl = QLabel()
+        avatar_lbl.setFixedSize(SIZE, SIZE)
+        avatar_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if photo_data:
+            pm = QPixmap()
+            pm.loadFromData(QByteArray(photo_data))
+            if not pm.isNull():
+                pm = pm.scaled(SIZE, SIZE,
+                               Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                               Qt.TransformationMode.SmoothTransformation)
+                rounded = QPixmap(SIZE, SIZE)
+                rounded.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                path = QPainterPath()
+                path.addEllipse(0, 0, SIZE, SIZE)
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, pm)
+                painter.end()
+                avatar_lbl.setPixmap(rounded)
+            else:
+                photo_data = None  # fall through to emoji
+        if not photo_data:
+            avatar_lbl.setText("👤")
+            avatar_lbl.setStyleSheet(
+                f"font-size:22px;background:transparent;border:none;"
+            )
+
+        text_col = QVBoxLayout(); text_col.setSpacing(1)
+        name_lbl = QLabel(uname)
+        name_lbl.setStyleSheet("color:#E2E8F0;font-size:12px;font-weight:600;background:transparent;")
         role_lbl = QLabel(urole)
-        role_lbl.setStyleSheet("color: #64748B; font-size: 10px; padding-left: 22px; background: transparent;")
-        user_layout.addWidget(name_lbl)
-        user_layout.addWidget(role_lbl)
+        role_lbl.setStyleSheet("color:#64748B;font-size:10px;background:transparent;")
+        text_col.addWidget(name_lbl)
+        text_col.addWidget(role_lbl)
+
+        avatar_row.addWidget(avatar_lbl)
+        avatar_row.addLayout(text_col)
+        avatar_row.addStretch()
+        user_layout.addLayout(avatar_row)
 
         chpw_btn = QPushButton("🔑  Change Password")
         chpw_btn.setCursor(Qt.CursorShape.PointingHandCursor)

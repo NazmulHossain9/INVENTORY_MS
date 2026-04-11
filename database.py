@@ -289,6 +289,8 @@ class Database:
             "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'staff'",
             "ALTER TABLE users ADD COLUMN role_id INTEGER REFERENCES roles(id) ON DELETE SET NULL",
             "ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN photo BLOB DEFAULT NULL",
+            "ALTER TABLE products ADD COLUMN image BLOB DEFAULT NULL",
         ]:
             try:
                 self.conn.execute(stmt)
@@ -425,14 +427,14 @@ class Database:
         hashed = hashlib.sha256(password.encode()).hexdigest()
         row = self.conn.execute("""
             SELECT u.id, u.username, u.role, u.role_id,
-                   COALESCE(r.name, u.role) AS role_name, u.is_active
+                   COALESCE(r.name, u.role) AS role_name, u.is_active, u.photo
             FROM users u
             LEFT JOIN roles r ON r.id = u.role_id
             WHERE u.username=? AND u.password=? AND u.is_active=1
         """, (username, hashed)).fetchone()
         return dict(row) if row else None
 
-    def register_user(self, username, password, role_name="staff"):
+    def register_user(self, username, password, role_name="staff", photo_bytes=None):
         """Register a new user. Raises ValueError on validation failure."""
         username = username.strip()
         if not username:
@@ -446,8 +448,8 @@ class Database:
         role_id = role_row["id"] if role_row else None
         try:
             self.conn.execute(
-                "INSERT INTO users (username, password, role, role_id) VALUES (?,?,?,?)",
-                (username, hashed, role_name, role_id)
+                "INSERT INTO users (username, password, role, role_id, photo) VALUES (?,?,?,?,?)",
+                (username, hashed, role_name, role_id, photo_bytes)
             )
             self.conn.commit()
         except sqlite3.IntegrityError:
@@ -456,10 +458,14 @@ class Database:
     def get_all_users(self):
         return self.conn.execute("""
             SELECT u.id, u.username, u.role, u.role_id,
-                   COALESCE(r.name, u.role) AS role_name, u.created_at, u.is_active
+                   COALESCE(r.name, u.role) AS role_name, u.created_at, u.is_active, u.photo
             FROM users u LEFT JOIN roles r ON r.id = u.role_id
             ORDER BY u.id
         """).fetchall()
+
+    def set_user_photo(self, user_id, photo_bytes):
+        self.conn.execute("UPDATE users SET photo=? WHERE id=?", (photo_bytes, user_id))
+        self.conn.commit()
 
     def verify_user_password(self, user_id, password):
         """Return True if the given password matches the stored hash for user_id."""
@@ -746,7 +752,7 @@ class Database:
         q = """
             SELECT p.id, p.name, p.sku, c.name AS category, s.name AS supplier,
                    p.unit, p.cost_price, p.sale_price, p.quantity, p.min_stock,
-                   p.description, p.updated_at
+                   p.description, p.updated_at, p.image
             FROM products p
             LEFT JOIN categories c ON c.id=p.category_id
             LEFT JOIN suppliers  s ON s.id=p.supplier_id
@@ -765,28 +771,30 @@ class Database:
         return self.conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()
 
     def add_product(self, name, sku, category_id, supplier_id, unit,
-                    cost_price, sale_price, quantity, min_stock, description):
+                    cost_price, sale_price, quantity, min_stock, description,
+                    image_bytes=None):
         cur = self.conn.execute("""
             INSERT INTO products (name,sku,category_id,supplier_id,unit,cost_price,
-                                  sale_price,quantity,min_stock,description)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                                  sale_price,quantity,min_stock,description,image)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (name, sku, category_id or None, supplier_id or None,
-              unit, cost_price, sale_price, quantity, min_stock, description))
+              unit, cost_price, sale_price, quantity, min_stock, description, image_bytes))
         pid = cur.lastrowid
         if quantity > 0:
             self._record_stock_movement(pid, "OPENING", quantity, quantity, "opening", None, "Opening stock")
         self.conn.commit()
 
     def update_product(self, pid, name, sku, category_id, supplier_id, unit,
-                       cost_price, sale_price, quantity, min_stock, description):
+                       cost_price, sale_price, quantity, min_stock, description,
+                       image_bytes=None):
         old = self.get_product_by_id(pid)
         self.conn.execute("""
             UPDATE products SET name=?,sku=?,category_id=?,supplier_id=?,unit=?,
                 cost_price=?,sale_price=?,quantity=?,min_stock=?,description=?,
-                updated_at=datetime('now','localtime')
+                image=?,updated_at=datetime('now','localtime')
             WHERE id=?
         """, (name, sku, category_id or None, supplier_id or None,
-              unit, cost_price, sale_price, quantity, min_stock, description, pid))
+              unit, cost_price, sale_price, quantity, min_stock, description, image_bytes, pid))
         if old and old["quantity"] != quantity:
             diff = quantity - old["quantity"]
             self._record_stock_movement(
