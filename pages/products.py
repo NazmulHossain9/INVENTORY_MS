@@ -177,7 +177,70 @@ class ProductDialog(QDialog):
 
         form.addRow("Name *",      self.name)
         form.addRow("SKU",         self.sku)
-        form.addRow("Category",    self.category)
+
+        # Category row: combo + "+ New" button + inline create panel
+        cat_col = QVBoxLayout(); cat_col.setSpacing(4)
+
+        cat_top = QHBoxLayout(); cat_top.setSpacing(6)
+        cat_top.addWidget(self.category)
+        self._new_cat_btn = QPushButton("+ New")
+        self._new_cat_btn.setFixedSize(60, 32)
+        self._new_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._new_cat_btn.setStyleSheet("""
+            QPushButton {
+                background: #EEF2FF; color: #4F46E5;
+                border: 1.5px solid #C7D2FE; border-radius: 6px;
+                font-size: 12px; font-weight: 700;
+            }
+            QPushButton:hover { background: #E0E7FF; }
+        """)
+        self._new_cat_btn.clicked.connect(self._toggle_new_cat)
+        cat_top.addWidget(self._new_cat_btn)
+        cat_col.addLayout(cat_top)
+
+        # Inline create panel (hidden by default)
+        self._cat_create_panel = QFrame()
+        self._cat_create_panel.setStyleSheet(
+            "QFrame{background:#F0FDF4;border-radius:7px;border:1px solid #86EFAC;}"
+        )
+        cp_lay = QHBoxLayout(self._cat_create_panel)
+        cp_lay.setContentsMargins(8, 6, 8, 6); cp_lay.setSpacing(6)
+        self._new_cat_input = QLineEdit()
+        self._new_cat_input.setPlaceholderText("New category name…")
+        self._new_cat_input.setStyleSheet(FIELD_STYLE)
+        self._new_cat_input.setFixedHeight(32)
+        self._new_cat_input.returnPressed.connect(self._create_category)
+        create_btn = QPushButton("Create")
+        create_btn.setFixedSize(60, 32)
+        create_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        create_btn.setStyleSheet("""
+            QPushButton {
+                background: #22C55E; color: white;
+                border: none; border-radius: 6px;
+                font-size: 12px; font-weight: 700;
+            }
+            QPushButton:hover { background: #16A34A; }
+        """)
+        create_btn.clicked.connect(self._create_category)
+        cancel_cat_btn = QPushButton("✕")
+        cancel_cat_btn.setFixedSize(32, 32)
+        cancel_cat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_cat_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #94A3B8;
+                border: 1px solid #CBD5E1; border-radius: 6px;
+                font-size: 13px; font-weight: 700;
+            }
+            QPushButton:hover { color: #EF4444; border-color: #FCA5A5; }
+        """)
+        cancel_cat_btn.clicked.connect(self._hide_new_cat)
+        cp_lay.addWidget(self._new_cat_input)
+        cp_lay.addWidget(create_btn)
+        cp_lay.addWidget(cancel_cat_btn)
+        self._cat_create_panel.setVisible(False)
+        cat_col.addWidget(self._cat_create_panel)
+
+        form.addRow("Category",    cat_col)
         form.addRow("Supplier",    self.supplier)
         form.addRow("Unit",        self.unit)
         pr = QHBoxLayout()
@@ -232,7 +295,48 @@ class ProductDialog(QDialog):
         btns.addWidget(c); btns.addWidget(s)
         root.addLayout(btns)
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    # ── category helpers ──────────────────────────────────────────────────────
+
+    def _toggle_new_cat(self):
+        visible = self._cat_create_panel.isVisible()
+        self._cat_create_panel.setVisible(not visible)
+        if not visible:
+            self._new_cat_input.setFocus()
+            self._new_cat_btn.setText("✕ Cancel")
+        else:
+            self._new_cat_input.clear()
+            self._new_cat_btn.setText("+ New")
+
+    def _hide_new_cat(self):
+        self._cat_create_panel.setVisible(False)
+        self._new_cat_input.clear()
+        self._new_cat_btn.setText("+ New")
+
+    def _create_category(self):
+        name = self._new_cat_input.text().strip()
+        if not name:
+            self._new_cat_input.setFocus()
+            return
+        try:
+            self.db.add_category(name)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", str(e))
+            return
+        # Repopulate combo and select the newly created category
+        self._cats = [{"id": None, "name": "— None —"}] + \
+                     [dict(r) for r in self.db.get_all_categories()]
+        self.category.blockSignals(True)
+        self.category.clear()
+        new_index = 0
+        for i, c in enumerate(self._cats):
+            self.category.addItem(c["name"], c["id"])
+            if c["name"] == name:
+                new_index = i
+        self.category.blockSignals(False)
+        self.category.setCurrentIndex(new_index)
+        self._hide_new_cat()
+
+    # ── image helpers ─────────────────────────────────────────────────────────
 
     def _refresh_preview(self, data: bytes):
         pm = _rounded_pixmap(data, _PREV_SIZE)
